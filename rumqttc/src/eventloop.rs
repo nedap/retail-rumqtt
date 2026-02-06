@@ -198,17 +198,8 @@ impl EventLoop {
         // this loop is necessary since self.incoming.pop_front() might return None. In that case,
         // instead of returning a None event, we try again.
         select! {
-            // Pull a bunch of packets from network, reply in bunch and yield the first item
-            o = network.readb(&mut self.state) => {
-                o?;
-                // flush all the acks and return first incoming packet
-                match time::timeout(network_timeout, network.flush()).await {
-                    Ok(inner) => inner?,
-                    Err(_)=> return Err(ConnectionError::FlushTimeout),
-                };
-                Ok(self.state.events.pop_front().unwrap())
-            },
-             // Handles pending and new requests.
+            biased;
+            // Handles pending and new requests.
             // If available, prioritises pending requests from previous session.
             // Else, pulls next request from user requests channel.
             // If conditions in the below branch are for flow control.
@@ -252,6 +243,16 @@ impl EventLoop {
                     Ok(self.state.events.pop_front().unwrap())
                 }
                 Err(_) => Err(ConnectionError::RequestsDone),
+            },
+            // Pull a bunch of packets from network, reply in bunch and yield the first item
+            o = network.readb(&mut self.state) => {
+                o?;
+                // flush all the acks and return first incoming packet
+                match time::timeout(network_timeout, network.flush()).await {
+                    Ok(inner) => inner?,
+                    Err(_)=> return Err(ConnectionError::FlushTimeout),
+                };
+                Ok(self.state.events.pop_front().unwrap())
             },
             // We generate pings irrespective of network activity. This keeps the ping logic
             // simple. We can change this behavior in future if necessary (to prevent extra pings)
